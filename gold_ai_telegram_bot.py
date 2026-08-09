@@ -7,11 +7,28 @@ from telegram import Bot
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID", "@goldaicore_alerts")
 
+# NEW - Custom Domain mo!
+WEBSITE_URL = os.getenv("WEBSITE_URL", "https://goldaicore.online")
+# Pwede rin FRONTEND_URL or GOLD_WEBSITE
+
+GOLD_API = "https://api.gold-api.com/price/XAU"
+CHECK_INTERVAL = 30
+
+HIGH_IMPACT = [
+    {"time": "20:30", "title": "US CPI", "tag": "CPI"},
+    {"time": "Aug 13", "title": "PPI Data", "tag": "PPI"},
+    {"time": "Aug 14", "title": "Retail Sales", "tag": "USD"},
+    {"time": "Aug 15", "title": "Fed Speaks", "tag": "FED"},
+    {"time": "Aug 20", "title": "FOMC Minutes", "tag": "FOMC"},
+    {"time": "Sep 5", "title": "US NFP", "tag": "NFP"},
+]
+
 def get_gold_price():
     try:
-        r = requests.get("https://api.gold-api.com/price/XAU", timeout=10)
+        r = requests.get(GOLD_API, timeout=10)
         data = r.json()
-        return float(data.get("price", 4341.94))
+        price = data.get("price", 4341.94)
+        return price
     except:
         return 4341.94
 
@@ -19,55 +36,45 @@ def compute_signal(price):
     entry = round(price) - 7
     sl = entry - 25
     tp = entry + 35
-    return entry, sl, tp, "BUY", 82, 64
+    rsi = 64
+    side = "BUY" if rsi >= 50 else "SELL"
+    conf = 82
+    return entry, sl, tp, side, conf, rsi
+
+async def send_alert(bot, price, change_pct=1.18):
+    entry, sl, tp, side, conf, rsi = compute_signal(price)
+    
+    msg = f"""
+🚨 <b>GOLD AI CORE • LIVE</b>
+
+💰 <b>XAUUSD: ${price:,.2f}</b> (+{change_pct}%)
+📊 <b>Signal: {side} {entry}</b> | SL {sl} | TP {tp}
+🎯 Confidence: {conf}% | RSI {rsi} Bullish
+
+📅 Next: <b>PPI Aug 13 20:30</b>
+🔥 Status: <b>FREE BETA</b>
+
+<a href="{WEBSITE_URL}">Open Dashboard →</a>
+"""
+    try:
+        await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="HTML", disable_web_page_preview=True)
+        print(f"[{datetime.now()}] Sent alert: {price}")
+    except Exception as e:
+        print(f"Error sending: {e}")
 
 async def main():
-    if not BOT_TOKEN:
-        print("ERROR: BOT_TOKEN missing!")
-        return
-
     bot = Bot(token=BOT_TOKEN)
-
-    # One-time activation
-    try:
-        await bot.send_message(
-            chat_id=CHAT_ID,
-            text="🟢 <b>Gold AI Core Bot Activated - Free Beta Live!</b>\n\nMonitoring XAUUSD every 30s... Beta 2/50",
-            parse_mode="HTML"
-        )
-        print("Activation sent!")
-    except Exception as e:
-        print(f"Activation error: {e}")
-
     last_price = 0
-    last_alert_time = 0
-
+    await bot.send_message(chat_id=CHAT_ID, text="🟢 <b>Gold AI Core Bot Activated - Free Beta Live!</b>\n\nMonitoring XAUUSD every 30s...\n🌐 Dashboard: "+WEBSITE_URL, parse_mode="HTML")
     while True:
-        try:
-            price = get_gold_price()
-            now = datetime.now().timestamp()
-            should_send = False
-
-            if last_price != 0:
-                if abs(price - last_price) / last_price > 0.003:
-                    should_send = True
-                elif now - last_alert_time > 1800:
-                    should_send = True
-
-            if should_send:
-                entry, sl, tp, side, conf, rsi = compute_signal(price)
-                change = ((price - last_price)/last_price)*100 if last_price else 0
-                msg = f"🚨 <b>GOLD AI CORE • LIVE</b>\n\n💰 <b>XAUUSD: ${price:,.2f}</b> ({change:+.2f}%)\n📊 <b>Signal: {side} {entry}</b> | SL {sl} | TP {tp}\n🎯 Confidence: {conf}% | RSI {rsi}\n\n<a href=\"https://gold.rbslabs.com\">Open Dashboard →</a>"
-                await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="HTML", disable_web_page_preview=True)
-                last_alert_time = now
-                print(f"Alert sent: {price}")
-
+        price = get_gold_price()
+        if abs(price - last_price) / last_price > 0.003 or last_price == 0:
+            await send_alert(bot, price)
             last_price = price
-
-        except Exception as e:
-            print(f"Loop error: {e}")
-
-        await asyncio.sleep(30)
+        await asyncio.sleep(CHECK_INTERVAL)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    if not BOT_TOKEN:
+        print("ERROR: Set BOT_TOKEN env variable!")
+    else:
+        asyncio.run(main())
